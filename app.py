@@ -3,189 +3,204 @@
 from __future__ import annotations
 
 import argparse
-import functools
-import os
-import pickle
-import sys
+import json
 
 import gradio as gr
 import numpy as np
-import torch
-import torch.nn as nn
-from huggingface_hub import hf_hub_download
 
-sys.path.insert(0, 'stylegan3')
+from model import Model
 
-TITLE = 'StyleGAN2'
-DESCRIPTION = '''This is an unofficial demo for https://github.com/NVlabs/stylegan3.
+TITLE = '# StyleGAN2'
+DESCRIPTION = '''This is an unofficial demo for [https://github.com/NVlabs/stylegan3](https://github.com/NVlabs/stylegan3).
 
 Expected execution time on Hugging Face Spaces: 4s
 '''
-SAMPLE_IMAGE_DIR = 'https://huggingface.co/spaces/hysts/StyleGAN2/resolve/main/samples'
-ARTICLE = f'''## Generated images
-- truncation: 0.7
-### CIFAR-10
-- size: 32x32
-- class index: 0-9
-- seed: 0-9
-![CIFAR-10 samples]({SAMPLE_IMAGE_DIR}/cifar10.jpg)
-### AFHQ-Cat
-- size: 512x512
-- seed: 0-99
-![AFHQ-Cat samples]({SAMPLE_IMAGE_DIR}/afhq-cat.jpg)
-### AFHQ-Dog
-- size: 512x512
-- seed: 0-99
-![AFHQ-Dog samples]({SAMPLE_IMAGE_DIR}/afhq-dog.jpg)
-### AFHQ-Wild
-- size: 512x512
-- seed: 0-99
-![AFHQ-Wild samples]({SAMPLE_IMAGE_DIR}/afhq-wild.jpg)
-### AFHQv2
-- size: 512x512
-- seed: 0-99
-![AFHQv2 samples]({SAMPLE_IMAGE_DIR}/afhqv2.jpg)
-### LSUN-Dog
-- size: 256x256
-- seed: 0-99
-![LSUN-Dog samples]({SAMPLE_IMAGE_DIR}/lsun-dog.jpg)
-### BreCaHAD
-- size: 512x512
-- seed: 0-99
-![BreCaHAD samples]({SAMPLE_IMAGE_DIR}/brecahad.jpg)
-### CelebA-HQ
-- size: 256x256
-- seed: 0-99
-![CelebA-HQ samples]({SAMPLE_IMAGE_DIR}/celebahq.jpg)
-### FFHQ
-- size: 1024x1024
-- seed: 0-99
-![FFHQ samples]({SAMPLE_IMAGE_DIR}/ffhq.jpg)
-### FFHQ-U
-- size: 1024x1024
-- seed: 0-99
-![FFHQ-U samples]({SAMPLE_IMAGE_DIR}/ffhq-u.jpg)
-### MetFaces
-- size: 1024x1024
-- seed: 0-99
-![MetFaces samples]({SAMPLE_IMAGE_DIR}/metfaces.jpg)
-### MetFaces-U
-- size: 1024x1024
-- seed: 0-99
-![MetFaces-U samples]({SAMPLE_IMAGE_DIR}/metfaces-u.jpg)
-
-<center><img src="https://visitor-badge.glitch.me/badge?page_id=hysts.stylegan2" alt="visitor badge"/></center>
-'''
-
-TOKEN = os.environ['TOKEN']
+FOOTER = '<img id="visitor-badge" alt="visitor badge" src="https://visitor-badge.glitch.me/badge?page_id=hysts.stylegan2" />'
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--theme', type=str)
-    parser.add_argument('--live', action='store_true')
     parser.add_argument('--share', action='store_true')
     parser.add_argument('--port', type=int)
     parser.add_argument('--disable-queue',
                         dest='enable_queue',
                         action='store_false')
-    parser.add_argument('--allow-flagging', type=str, default='never')
     return parser.parse_args()
 
 
-def generate_z(z_dim: int, seed: int, device: torch.device) -> torch.Tensor:
-    return torch.from_numpy(np.random.RandomState(seed).randn(
-        1, z_dim)).to(device).float()
+def update_class_index(name: str) -> dict:
+    if name == 'CIFAR-10':
+        return gr.Slider.update(maximum=9, visible=True)
+    else:
+        return gr.Slider.update(visible=False)
 
 
-@torch.inference_mode()
-def generate_image(model_name: str, class_index: int, seed: int,
-                   truncation_psi: float, model_dict: dict[str, nn.Module],
-                   device: torch.device) -> np.ndarray:
-    model = model_dict[model_name]
-    seed = int(np.clip(seed, 0, np.iinfo(np.uint32).max))
-
-    z = generate_z(model.z_dim, seed, device)
-    label = torch.zeros([1, model.c_dim], device=device)
-    class_index = round(class_index)
-    class_index = min(max(0, class_index), model.c_dim - 1)
-    class_index = torch.tensor(class_index, dtype=torch.long)
-    if class_index >= 0:
-        label[:, class_index] = 1
-
-    out = model(z, label, truncation_psi=truncation_psi)
-    out = (out.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-    return out[0].cpu().numpy()
+def get_sample_image_url(name: str) -> str:
+    sample_image_dir = 'https://huggingface.co/spaces/hysts/StyleGAN2/resolve/main/samples'
+    return f'{sample_image_dir}/{name}.jpg'
 
 
-def load_model(file_name: str, device: torch.device) -> nn.Module:
-    path = hf_hub_download('hysts/StyleGAN2',
-                           f'models/{file_name}',
-                           use_auth_token=TOKEN)
-    with open(path, 'rb') as f:
-        model = pickle.load(f)['G_ema']
-    model.eval()
-    model.to(device)
-    with torch.inference_mode():
-        z = torch.zeros((1, model.z_dim)).to(device)
-        label = torch.zeros([1, model.c_dim], device=device)
-        model(z, label)
-    return model
+def get_sample_image_markdown(name: str) -> str:
+    url = get_sample_image_url(name)
+    if name == 'cifar10':
+        size = 32
+        class_index = '0-9'
+        seed = '0-9'
+    else:
+        class_index = 'N/A'
+        seed = '0-99'
+        if name == 'afhq-cat':
+            size = 512
+        elif name == 'afhq-dog':
+            size = 512
+        elif name == 'afhq-wild':
+            size = 512
+        elif name == 'afhqv2':
+            size = 512
+        elif name == 'brecahad':
+            size = 256
+        elif name == 'celebahq':
+            size = 1024
+        elif name == 'ffhq':
+            size = 1024
+        elif name == 'ffhq-u':
+            size = 1024
+        elif name == 'lsun-dog':
+            size = 256
+        elif name == 'metfaces':
+            size = 1024
+        elif name == 'metfaces-u':
+            size = 1024
+        else:
+            raise ValueError
+
+    return f'''
+    - size: {size}x{size}
+    - class_index: {class_index}
+    - seed: {seed}
+    - truncation: 0.7
+    ![sample images]({url})'''
+
+
+def load_class_names(name: str) -> list[str]:
+    with open(f'labels/{name}_classes.json') as f:
+        names = json.load(f)
+    return names
+
+
+def get_class_name_df(name: str) -> list:
+    names = load_class_names(name)
+    return list(map(list, enumerate(names)))  # type: ignore
+
+
+CIFAR10_NAMES = load_class_names('cifar10')
+
+
+def update_class_name(model_name: str, index: int) -> dict:
+    if model_name == 'CIFAR-10':
+        value = CIFAR10_NAMES[index]
+        return gr.Textbox.update(value=value, visible=True)
+    else:
+        return gr.Textbox.update(visible=False)
 
 
 def main():
     args = parse_args()
-    device = torch.device(args.device)
+    model = Model(args.device)
 
-    model_names = {
-        'AFHQ-Cat-512': 'stylegan2-afhqcat-512x512.pkl',
-        'AFHQ-Dog-512': 'stylegan2-afhqdog-512x512.pkl',
-        'AFHQv2-512': 'stylegan2-afhqv2-512x512.pkl',
-        'AFHQ-Wild-512': 'stylegan2-afhqwild-512x512.pkl',
-        'BreCaHAD-512': 'stylegan2-brecahad-512x512.pkl',
-        'CelebA-HQ-256': 'stylegan2-celebahq-256x256.pkl',
-        'CIFAR-10': 'stylegan2-cifar10-32x32.pkl',
-        'FFHQ-256': 'stylegan2-ffhq-256x256.pkl',
-        'FFHQ-512': 'stylegan2-ffhq-512x512.pkl',
-        'FFHQ-1024': 'stylegan2-ffhq-1024x1024.pkl',
-        'FFHQ-U-256': 'stylegan2-ffhqu-256x256.pkl',
-        'FFHQ-U-1024': 'stylegan2-ffhqu-1024x1024.pkl',
-        'LSUN-Dog-256': 'stylegan2-lsundog-256x256.pkl',
-        'MetFaces-1024': 'stylegan2-metfaces-1024x1024.pkl',
-        'MetFaces-U-1024': 'stylegan2-metfacesu-1024x1024.pkl',
-    }
+    with gr.Blocks(theme=args.theme, css='style.css') as demo:
+        gr.Markdown(TITLE)
+        gr.Markdown(DESCRIPTION)
 
-    model_dict = {
-        name: load_model(file_name, device)
-        for name, file_name in model_names.items()
-    }
+        with gr.Tabs():
+            with gr.TabItem('App'):
+                with gr.Row():
+                    with gr.Column():
+                        with gr.Group():
+                            model_name = gr.Dropdown(list(
+                                model.MODEL_NAME_DICT.keys()),
+                                                     value='FFHQ-1024',
+                                                     label='Model')
+                            seed = gr.Slider(0,
+                                             np.iinfo(np.uint32).max,
+                                             step=1,
+                                             value=0,
+                                             label='Seed')
+                            psi = gr.Slider(0,
+                                            2,
+                                            step=0.05,
+                                            value=0.7,
+                                            label='Truncation psi')
+                            class_index = gr.Slider(0,
+                                                    9,
+                                                    step=1,
+                                                    value=0,
+                                                    label='Class Index',
+                                                    visible=False)
+                            class_name = gr.Textbox(
+                                value=CIFAR10_NAMES[class_index.value],
+                                label='Class Label',
+                                interactive=False,
+                                visible=False)
+                            run_button = gr.Button('Run')
+                    with gr.Column():
+                        result = gr.Image(label='Result', elem_id='result')
 
-    func = functools.partial(generate_image,
-                             model_dict=model_dict,
-                             device=device)
-    func = functools.update_wrapper(func, generate_image)
+            with gr.TabItem('Sample Images'):
+                with gr.Row():
+                    model_name2 = gr.Dropdown([
+                        'afhq-cat',
+                        'afhq-dog',
+                        'afhq-wild',
+                        'afhqv2',
+                        'brecahad',
+                        'celebahq',
+                        'cifar10',
+                        'ffhq',
+                        'ffhq-u',
+                        'lsun-dog',
+                        'metfaces',
+                        'metfaces-u',
+                    ],
+                                              value='afhq-cat',
+                                              label='Model')
+                with gr.Row():
+                    text = get_sample_image_markdown(model_name2.value)
+                    sample_images = gr.Markdown(text)
 
-    gr.Interface(
-        func,
-        [
-            gr.inputs.Radio(list(model_names.keys()),
-                            type='value',
-                            default='FFHQ-1024',
-                            label='Model'),
-            gr.inputs.Number(default=0, label='Class index'),
-            gr.inputs.Number(default=0, label='Seed'),
-            gr.inputs.Slider(
-                0, 2, step=0.05, default=0.7, label='Truncation psi'),
-        ],
-        gr.outputs.Image(type='numpy', label='Output'),
-        title=TITLE,
-        description=DESCRIPTION,
-        article=ARTICLE,
-        theme=args.theme,
-        allow_flagging=args.allow_flagging,
-        live=args.live,
-    ).launch(
+        gr.Markdown(FOOTER)
+
+        model_name.change(fn=model.set_model, inputs=model_name, outputs=None)
+        model_name.change(fn=update_class_index,
+                          inputs=model_name,
+                          outputs=class_index)
+        model_name.change(fn=update_class_name,
+                          inputs=[
+                              model_name,
+                              class_index,
+                          ],
+                          outputs=class_name)
+        class_index.change(fn=update_class_name,
+                           inputs=[
+                               model_name,
+                               class_index,
+                           ],
+                           outputs=class_name)
+        run_button.click(fn=model.set_model_and_generate_image,
+                         inputs=[
+                             model_name,
+                             seed,
+                             psi,
+                             class_index,
+                         ],
+                         outputs=result)
+        model_name2.change(fn=get_sample_image_markdown,
+                           inputs=model_name2,
+                           outputs=sample_images)
+
+    demo.launch(
         enable_queue=args.enable_queue,
         server_port=args.port,
         share=args.share,

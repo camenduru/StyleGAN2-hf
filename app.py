@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 
 import gradio as gr
@@ -10,24 +9,10 @@ import numpy as np
 
 from model import Model
 
-TITLE = '# StyleGAN2'
-DESCRIPTION = '''This is an unofficial demo for [https://github.com/NVlabs/stylegan3](https://github.com/NVlabs/stylegan3).
+DESCRIPTION = '''# StyleGAN2
 
-Expected execution time on Hugging Face Spaces: 4s
+This is an unofficial demo for [https://github.com/NVlabs/stylegan3](https://github.com/NVlabs/stylegan3).
 '''
-FOOTER = '<img id="visitor-badge" alt="visitor badge" src="https://visitor-badge.glitch.me/badge?page_id=hysts.stylegan2" />'
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--device', type=str, default='cpu')
-    parser.add_argument('--theme', type=str)
-    parser.add_argument('--share', action='store_true')
-    parser.add_argument('--port', type=int)
-    parser.add_argument('--disable-queue',
-                        dest='enable_queue',
-                        action='store_false')
-    return parser.parse_args()
 
 
 def update_class_index(name: str) -> dict:
@@ -106,106 +91,92 @@ def update_class_name(model_name: str, index: int) -> dict:
         return gr.Textbox.update(visible=False)
 
 
-def main():
-    args = parse_args()
-    model = Model(args.device)
+model = Model()
 
-    with gr.Blocks(theme=args.theme, css='style.css') as demo:
-        gr.Markdown(TITLE)
-        gr.Markdown(DESCRIPTION)
+with gr.Blocks(css='style.css') as demo:
+    gr.Markdown(DESCRIPTION)
 
-        with gr.Tabs():
-            with gr.TabItem('App'):
-                with gr.Row():
-                    with gr.Column():
-                        with gr.Group():
-                            model_name = gr.Dropdown(list(
-                                model.MODEL_NAME_DICT.keys()),
-                                                     value='FFHQ-1024',
-                                                     label='Model')
-                            seed = gr.Slider(0,
-                                             np.iinfo(np.uint32).max,
-                                             step=1,
-                                             value=0,
-                                             label='Seed')
-                            psi = gr.Slider(0,
-                                            2,
-                                            step=0.05,
-                                            value=0.7,
-                                            label='Truncation psi')
-                            class_index = gr.Slider(0,
-                                                    9,
-                                                    step=1,
-                                                    value=0,
-                                                    label='Class Index',
-                                                    visible=False)
-                            class_name = gr.Textbox(
-                                value=CIFAR10_NAMES[class_index.value],
-                                label='Class Label',
-                                interactive=False,
-                                visible=False)
-                            run_button = gr.Button('Run')
-                    with gr.Column():
-                        result = gr.Image(label='Result', elem_id='result')
+    with gr.Tabs():
+        with gr.TabItem('App'):
+            with gr.Row():
+                with gr.Column():
+                    model_name = gr.Dropdown(list(
+                        model.MODEL_NAME_DICT.keys()),
+                                             value='FFHQ-1024',
+                                             label='Model')
+                    seed = gr.Slider(0,
+                                     np.iinfo(np.uint32).max,
+                                     step=1,
+                                     value=0,
+                                     label='Seed')
+                    psi = gr.Slider(0,
+                                    2,
+                                    step=0.05,
+                                    value=0.7,
+                                    label='Truncation psi')
+                    class_index = gr.Slider(0,
+                                            9,
+                                            step=1,
+                                            value=0,
+                                            label='Class Index',
+                                            visible=False)
+                    class_name = gr.Textbox(
+                        value=CIFAR10_NAMES[class_index.value],
+                        label='Class Label',
+                        interactive=False,
+                        visible=False)
+                    run_button = gr.Button('Run')
+                with gr.Column():
+                    result = gr.Image(label='Result', elem_id='result')
 
-            with gr.TabItem('Sample Images'):
-                with gr.Row():
-                    model_name2 = gr.Dropdown([
-                        'afhq-cat',
-                        'afhq-dog',
-                        'afhq-wild',
-                        'afhqv2',
-                        'brecahad',
-                        'celebahq',
-                        'cifar10',
-                        'ffhq',
-                        'ffhq-u',
-                        'lsun-dog',
-                        'metfaces',
-                        'metfaces-u',
-                    ],
-                                              value='afhq-cat',
-                                              label='Model')
-                with gr.Row():
-                    text = get_sample_image_markdown(model_name2.value)
-                    sample_images = gr.Markdown(text)
+        with gr.TabItem('Sample Images'):
+            with gr.Row():
+                model_name2 = gr.Dropdown([
+                    'afhq-cat',
+                    'afhq-dog',
+                    'afhq-wild',
+                    'afhqv2',
+                    'brecahad',
+                    'celebahq',
+                    'cifar10',
+                    'ffhq',
+                    'ffhq-u',
+                    'lsun-dog',
+                    'metfaces',
+                    'metfaces-u',
+                ],
+                                          value='afhq-cat',
+                                          label='Model')
+            with gr.Row():
+                text = get_sample_image_markdown(model_name2.value)
+                sample_images = gr.Markdown(text)
 
-        gr.Markdown(FOOTER)
+    model_name.change(fn=model.set_model, inputs=model_name, outputs=None)
+    model_name.change(fn=update_class_index,
+                      inputs=model_name,
+                      outputs=class_index)
+    model_name.change(fn=update_class_name,
+                      inputs=[
+                          model_name,
+                          class_index,
+                      ],
+                      outputs=class_name)
+    class_index.change(fn=update_class_name,
+                       inputs=[
+                           model_name,
+                           class_index,
+                       ],
+                       outputs=class_name)
+    run_button.click(fn=model.set_model_and_generate_image,
+                     inputs=[
+                         model_name,
+                         seed,
+                         psi,
+                         class_index,
+                     ],
+                     outputs=result)
+    model_name2.change(fn=get_sample_image_markdown,
+                       inputs=model_name2,
+                       outputs=sample_images)
 
-        model_name.change(fn=model.set_model, inputs=model_name, outputs=None)
-        model_name.change(fn=update_class_index,
-                          inputs=model_name,
-                          outputs=class_index)
-        model_name.change(fn=update_class_name,
-                          inputs=[
-                              model_name,
-                              class_index,
-                          ],
-                          outputs=class_name)
-        class_index.change(fn=update_class_name,
-                           inputs=[
-                               model_name,
-                               class_index,
-                           ],
-                           outputs=class_name)
-        run_button.click(fn=model.set_model_and_generate_image,
-                         inputs=[
-                             model_name,
-                             seed,
-                             psi,
-                             class_index,
-                         ],
-                         outputs=result)
-        model_name2.change(fn=get_sample_image_markdown,
-                           inputs=model_name2,
-                           outputs=sample_images)
-
-    demo.launch(
-        enable_queue=args.enable_queue,
-        server_port=args.port,
-        share=args.share,
-    )
-
-
-if __name__ == '__main__':
-    main()
+demo.queue().launch(show_api=False)
